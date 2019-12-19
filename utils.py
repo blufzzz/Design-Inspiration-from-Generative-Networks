@@ -4,12 +4,17 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from skimage.feature import canny
-from skimage.morphology import dilation, disk
+from skimage.morphology import dilation, disk, square
 from skimage.color import rgb2gray
 from skimage.filters import gaussian
 from skimage.segmentation import flood
 
-def image2edges(image, low_thresh=0.05, high_thresh=0.3, sigma=0.1, selem=True, d = 1.5):
+def image2edges(image, 
+                low_thresh=0.01, 
+                high_thresh=0.2, 
+                sigma=1, 
+                selem=True, 
+                d = 2):
         '''
         image - np.array
         '''
@@ -22,13 +27,12 @@ def image2edges(image, low_thresh=0.05, high_thresh=0.3, sigma=0.1, selem=True, 
         return edges.astype(float)
 
 
-def edges2mask(edge):
+def edges2mask(edge, padding=10):
 
     h,w = edge.shape[:2]
-    shape = flood(gaussian(edge,0.2),
-                           seed_point=(0, 0))
+    shape = flood(np.pad(edge, padding, mode='constant'),seed_point=(0, 0))
 
-    shape = ~shape
+    shape = ~shape[padding:-padding, padding:-padding]
     return shape.astype(float)        
 
 
@@ -75,6 +79,6 @@ def collate_fn(items):
         print("All items in batch are None")
         return None
     
-    batch = (torch.stack([item[0] for item in items]), torch.stack([item[1] for item in items]))
-    
+    batch = [torch.stack([item[i] for item in items]) for i in range(len(items[0]))]
+
     return batch    

@@ -1,27 +1,27 @@
 import os
-import skimage
-import imageio
-from PIL import Image
-from skimage import io
+import cv2
 import numpy as np
-from torchvision.transforms import Resize, ToTensor, Normalize
+from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset
-
 import torch
 import ast
 from utils import image2edges, edges2mask,tensor2numpy
+from skimage.transform import resize
+
 
 class FashionEdgesDataset(Dataset):
     def __init__(self, 
                  images_fold, 
                  attr_file=None, 
                  check_corrupted=False,
+                 size = (128,128),
                  return_mask=True):
         
         self.corrupted_images = set()
         self.check_corrupted = check_corrupted
         self.images_fold = images_fold
         self.return_mask = return_mask
+        self.size = size
         
         if attr_file is not None:
             images2attr_dict = {}
@@ -46,32 +46,33 @@ class FashionEdgesDataset(Dataset):
     
     def _is_appropriate(self, img, thresh = 10):
     
-        return np.all(img[:thresh,:thresh] == 255)
+        return np.all(img[:thresh,:thresh] == 1)
     
     def __getitem__(self, idx):
         
         image_name = self.images_names[idx]
-        img = Image.open(os.path.join(self.images_fold, image_name))
+        img = cv2.imread(os.path.join(self.images_fold, image_name))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)/255.
 
         if not self.check_corrupted and not self._is_appropriate(np.array(img)):
             return None
-        
-        img = Resize((128, 128))(img)
-        
-        img = ToTensor()(img)
-        if img.shape[0] > 3:
-            img = img[:3]
-        
-        img_np = tensor2numpy(img)
 
-        edges_np = image2edges(img_np)
-        edges = torch.tensor(edges_np, dtype=torch.float32).unsqueeze(0)
+        edges_np = image2edges(img)
+        img = resize(img, self.size, anti_aliasing=True)
+        img = ToTensor()(img)
+
+        mask = None
         if self.return_mask:
-            mask = edges2mask(edges_np)
-            mask = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
-            return mask, img
-        else:
-            return edges, img   
+            mask_np = edges2mask(edges_np)
+            mask_np = resize(mask_np, self.size, anti_aliasing=False)
+            mask_np[mask_np > 0.] = 1.
+            mask = torch.tensor(mask_np, dtype=torch.float64).unsqueeze(0)
+
+        edges_np = resize(edges_np, self.size, anti_aliasing=False)
+        edges_np[edges_np > 0.] = 1.
+        edges = torch.tensor(edges_np, dtype=torch.float64).unsqueeze(0)
+        
+        return edges, img, mask
 
     def __len__(self):
         return len(self.images_names)
