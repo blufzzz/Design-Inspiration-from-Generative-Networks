@@ -5,9 +5,11 @@ from PIL import Image
 from skimage import io
 import numpy as np
 from torchvision.transforms import Resize, ToTensor, Normalize
+from torch.utils.data import Dataset
+
 import torch
 import ast
-from utils import image2edges, edges2mask
+from utils import image2edges, edges2mask,tensor2numpy
 
 class FashionEdgesDataset(Dataset):
     def __init__(self, 
@@ -19,6 +21,7 @@ class FashionEdgesDataset(Dataset):
         self.corrupted_images = set()
         self.check_corrupted = check_corrupted
         self.images_fold = images_fold
+        self.return_mask = return_mask
         
         if attr_file is not None:
             images2attr_dict = {}
@@ -48,7 +51,8 @@ class FashionEdgesDataset(Dataset):
     def __getitem__(self, idx):
         
         image_name = self.images_names[idx]
-        img = Image.open(os.path.join(self.images_fold, image_name))#.convert('RGB')        
+        img = Image.open(os.path.join(self.images_fold, image_name))
+
         if not self.check_corrupted and not self._is_appropriate(np.array(img)):
             return None
         
@@ -62,10 +66,10 @@ class FashionEdgesDataset(Dataset):
 
         edges_np = image2edges(img_np)
         edges = torch.tensor(edges_np, dtype=torch.float32).unsqueeze(0)
-        if return_mask:
+        if self.return_mask:
             mask = edges2mask(edges_np)
             mask = torch.tensor(mask, dtype=torch.float32).unsqueeze(0)
-            return edges, mask, img
+            return mask, img
         else:
             return edges, img   
 

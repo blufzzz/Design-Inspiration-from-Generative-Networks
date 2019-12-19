@@ -7,7 +7,7 @@ from skimage.feature import canny
 from skimage.morphology import dilation, disk
 from skimage.color import rgb2gray
 from skimage.filters import gaussian
-from skimage.segmentation import clear_border
+from skimage.segmentation import flood
 
 def image2edges(image, low_thresh=0.05, high_thresh=0.3, sigma=0.1, selem=True, d = 1.5):
         '''
@@ -19,16 +19,17 @@ def image2edges(image, low_thresh=0.05, high_thresh=0.3, sigma=0.1, selem=True, 
             selem = disk(d)
             edges = dilation(edges, selem)
   
-        return edges
+        return edges.astype(float)
 
 
-def edge2mask(edge):
+def edges2mask(edge):
 
     h,w = edge.shape[:2]
     shape = flood(gaussian(edge,0.2),
                            seed_point=(0, 0))
 
-    return shape        
+    shape = ~shape
+    return shape.astype(float)        
 
 
 
