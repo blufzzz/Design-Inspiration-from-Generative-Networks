@@ -12,14 +12,17 @@ from skimage.segmentation import flood
 def image2edges(image, 
                 low_thresh=0.01, 
                 high_thresh=0.2, 
-                sigma=1, 
+                sigma=0.5, 
                 selem=True, 
                 d = 2):
         '''
         image - np.array
         '''
         image_gray_rescaled = rgb2gray(image)
-        edges = canny(image_gray_rescaled, sigma = sigma, low_threshold=low_thresh, high_threshold=high_thresh)
+        edges = canny(image_gray_rescaled, 
+                      sigma = sigma, 
+                      low_threshold=low_thresh, 
+                      high_threshold=high_thresh)
         if selem:
             selem = disk(d)
             edges = dilation(edges, selem)
@@ -42,6 +45,7 @@ def tensor2numpy(img):
     return img.permute(1,2,0).cpu().numpy()
     
 def vis_batch(batch, number):
+    batch_size = batch.shape[0]
     l = min(int(np.sqrt(batch_size)),int(np.sqrt(number)))
     fig, axes = plt.subplots(nrows = l , ncols = l, figsize = (2*l,2*l))
     iterable = [axes] if l == 1 else axes.flatten()
@@ -54,7 +58,7 @@ def vis_batch(batch, number):
         ax.set_xticks([])
         ax.set_yticks([])
 
-def save_dict(dict_to_save, specification):
+def save_dict(exp_path, dict_to_save, specification):
 
     path = os.path.join(exp_path,specification)
     torch.save(dict_to_save, path)
