@@ -1,0 +1,27 @@
+batch_size: 32
+input_nc: 1
+output_nc: 3
+ngf: 64
+ndf: 64
+epoch_count: 1
+niter: 200
+niter_decay: 200
+lr: 0.0002
+lr_policy: 'lambda'
+lr_decay_iters: 50
+beta1: 0.5
+cuda: True
+threads: 4
+seed: 123
+lamb: 10
+device: torch.device("cuda:0")
+VIS_FREQ: 10
+SAVE_FREQ: 50
+continue_training: false
+comment: 'polyvore-viton'
+n_images_vis: 36
+
+dataset:
+  datasets: ['polyvore', 'viton']
+  polyvore_path: '../polyvore_images'
+  viton_path: '../viton_images'

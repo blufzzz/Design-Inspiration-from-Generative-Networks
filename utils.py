@@ -58,6 +58,9 @@ def vis_batch(batch, number):
         ax.set_xticks([])
         ax.set_yticks([])
 
+    plt.close('all')    
+    return fig_to_array(fig)    
+
 def save_dict(exp_path, dict_to_save, specification):
 
     path = os.path.join(exp_path,specification)
@@ -85,4 +88,18 @@ def collate_fn(items):
     
     batch = [torch.stack([item[i] for item in items]) for i in range(len(items[0]))]
 
-    return batch    
+    return batch   
+
+
+def load_config(path):
+    with open(path) as fin:
+        config = edict(yaml.safe_load(fin))
+
+    return config     
+
+
+def fig_to_array(fig):
+    fig.canvas.draw()
+    fig_image = np.array(fig.canvas.renderer._renderer)
+
+    return fig_image
