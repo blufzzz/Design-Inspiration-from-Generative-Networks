@@ -1,27 +1,25 @@
-batch_size: 32
+use_scheduler: true
+batch_size: 2 #14
 input_nc: 1
 output_nc: 3
-ngf: 64
-ndf: 64
-epoch_count: 1
-niter: 200
-niter_decay: 200
-lr: 0.0002
-lr_policy: 'lambda'
-lr_decay_iters: 50
+ngf: 42 
+ndf: 42
+niter: 1 # epoch without decay
+niter_decay: 100 # epoch with decay
+lr: 0.0005
+lr_policy: 'step'
+step_size: 1
 beta1: 0.5
 cuda: True
 threads: 4
 seed: 123
-lamb: 10
-device: torch.device("cuda:0")
-VIS_FREQ: 10
-SAVE_FREQ: 50
+lamb: 5
+VIS_FREQ: 100 # in iters
+SAVE_FREQ: 1 # in epochs
 continue_training: false
-comment: 'polyvore-viton'
-n_images_vis: 36
+comment: 'feidegger-agata_lr-step_random-sigma-disc_HR'
+resolution: [1024,712] #[512,356] #[256,256]
+n_images_vis: 3
 
 dataset:
-  datasets: ['polyvore', 'viton']
-  polyvore_path: '../polyvore_images'
-  viton_path: '../viton_images'
+  paths: ['feidegger/images_paths.txt', 'agata/images_paths.txt']

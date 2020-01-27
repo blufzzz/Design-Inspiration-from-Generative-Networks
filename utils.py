@@ -1,8 +1,10 @@
 import re
 import os
 import torch
+import yaml
 import matplotlib.pyplot as plt
 import numpy as np
+from easydict import EasyDict as edict
 from skimage.feature import canny
 from skimage.morphology import dilation, disk, square
 from skimage.color import rgb2gray
@@ -14,16 +16,22 @@ def image2edges(image,
                 high_thresh=0.2, 
                 sigma=0.5, 
                 selem=True, 
-                d = 2):
+                d = 2,
+                randomize_disc=True,
+                randomize_sigma=True):
         '''
         image - np.array
         '''
+        if randomize_sigma:
+            sigma = np.random.choice([1,2,4,6], 1)[0]
         image_gray_rescaled = rgb2gray(image)
         edges = canny(image_gray_rescaled, 
                       sigma = sigma, 
                       low_threshold=low_thresh, 
                       high_threshold=high_thresh)
         if selem:
+            if randomize_disc:
+                d = np.random.choice([2,4,6,8], 1)[0]
             selem = disk(d)
             edges = dilation(edges, selem)
   
@@ -39,15 +47,43 @@ def edges2mask(edge, padding=10):
     return shape.astype(float)        
 
 
+def calc_gradient_penalty(netD, real_data, fake_data):
+    batch_size = real_data.shape[0]
+    # print "real_data: ", real_data.size(), fake_data.size()
+    alpha = torch.rand(batch_size, 1)
+    alpha = alpha.expand(batch_size, int(real_data.nelement()/batch_size)).contiguous().view(batch_size, 3, 128, 128)
+    alpha = alpha.cuda()
 
-def tensor2numpy(img): 
+    interpolates = alpha * real_data + ((1 - alpha) * fake_data)
+
+    interpolates = interpolates.cuda()
+    interpolates = autograd.Variable(interpolates, requires_grad=True)
+
+    disc_interpolates = netD(interpolates)
+
+    gradients = autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                              grad_outputs=torch.ones(disc_interpolates.size()).cuda(),
+                              create_graph=True, retain_graph=True, only_inputs=True)[0]
+    gradients = gradients.view(gradients.size(0), -1)
+
+    gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * LAMBDA
+    return gradient_penalty
+
+
+def tensor2numpy(img):  
     #[h,w,c] -> [c,h,w]
     return img.permute(1,2,0).cpu().numpy()
     
 def vis_batch(batch, number):
+
     batch_size = batch.shape[0]
-    l = min(int(np.sqrt(batch_size)),int(np.sqrt(number)))
-    fig, axes = plt.subplots(nrows = l , ncols = l, figsize = (2*l,2*l))
+    if number < 4:
+        l = min(batch_size,number) 
+        fig, axes = plt.subplots(nrows = 1 , ncols = l, figsize = (5*l,5))
+    else:    
+        l = min(int(np.sqrt(batch_size)),int(np.sqrt(number))) 
+        fig, axes = plt.subplots(nrows = l , ncols = l, figsize = (2*l,2*l))
+    
     iterable = [axes] if l == 1 else axes.flatten()
     for i, ax in enumerate(iterable):
 
@@ -60,13 +96,12 @@ def vis_batch(batch, number):
 
     plt.close('all')    
     return fig_to_array(fig)    
-
-def save_dict(exp_path, dict_to_save, specification):
-
-    path = os.path.join(exp_path,specification)
-    torch.save(dict_to_save, path)
     
 def save_batch(batch, folder = './results'):
+
+    '''
+    batch - tensors
+    '''
     
     for tensor in batch:
         names = os.listdir(folder)
@@ -85,8 +120,11 @@ def collate_fn(items):
     if len(items) == 0:
         print("All items in batch are None")
         return None
-    
-    batch = [torch.stack([item[i] for item in items]) for i in range(len(items[0]))]
+
+    if type(items[0]) is torch.Tensor:    
+        return torch.stack(items)
+    else:
+        batch = [torch.stack([item[i] for item in items]) for i in range(len(items[0]))]
 
     return batch   
 
@@ -102,4 +140,4 @@ def fig_to_array(fig):
     fig.canvas.draw()
     fig_image = np.array(fig.canvas.renderer._renderer)
 
-    return fig_image
+    return fig_image[...,:3]

@@ -1,24 +1,14 @@
 from __future__ import print_function
 
 import os
-import ast
-import re
-from shutil import rmtree
+import sys
 from datetime import datetime
 from collections import defaultdict
-
-from itertools import islice
-import matplotlib.pyplot as plt
-from PIL import Image
 import numpy as np
+import matplotlib.pyplot as plt
 
-import json
-import yaml
-from easydict import EasyDict as edict
 
-from IPython.display import clear_output
 from IPython.core.debugger import set_trace
-from tqdm import tqdm_notebook
 
 import torch
 from torch import nn 
@@ -26,23 +16,15 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from tensorboardX import SummaryWriter
 
-
 from networks import define_G, define_D, GANLoss, get_scheduler, update_learning_rate
-from utils import vis_batch, save_dict, save_batch, collate_fn, load_config
-
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.backends.cudnn = True
-device = torch.cuda.current_device()
+from utils import vis_batch, save_batch, collate_fn, load_config
+from dataset import FashionEdgesDataset
 
 config = load_config('config.yaml')
-opt =  edict({"lr_policy":config.lr_policy,
-                        "epoch_count":config.epoch_count,
-                        "niter_decay":config.niter_decay,
-                        "lr_decay_iters":config.lr_decay_iters,
-                        "niter":config.niter})
 
-train_set = FashionEdgesDataset(config.dataset)
+device = torch.cuda.current_device()
+
+train_set = FashionEdgesDataset(config.dataset.paths, config.resolution)
 training_data_loader = DataLoader(dataset=train_set,
                                   batch_size=config.batch_size, 
                                   collate_fn = collate_fn,
@@ -53,6 +35,17 @@ N = len(training_data_loader)
 netG = define_G(config.input_nc, config.output_nc, config.ngf, 'batch', False, 'normal', 0.02, gpu_id=device)
 netD = define_D(config.input_nc + config.output_nc, config.ndf, 'basic', gpu_id=device)
 
+s_total = 0
+for param in netG.parameters():
+    s_total+=param.numel()
+print ('Params in Generator:', s_total)
+
+s_total = 0
+for param in netD.parameters():
+    s_total+=param.numel() 
+print ('Params in Discriminator:', s_total)
+
+
 criterionGAN = GANLoss().to(device)
 criterionL1 = nn.L1Loss().to(device)
 criterionMSE = nn.MSELoss().to(device)
@@ -60,49 +53,52 @@ criterionMSE = nn.MSELoss().to(device)
 # setup optimizer
 optimizerG = optim.Adam(netG.parameters(), lr=config.lr, betas=(config.beta1, 0.999))
 optimizerD = optim.Adam(netD.parameters(), lr=config.lr, betas=(config.beta1, 0.999))
-netG_scheduler = get_scheduler(optimizerG, opt)
-netD_scheduler = get_scheduler(optimizerD, opt)
 
-continue_training = config.continue_training
+if config.use_scheduler:
+    netG_scheduler = get_scheduler(optimizerG, config)
+    netD_scheduler = get_scheduler(optimizerD, config)
 
-exp_path = './logs/' + config.comment + datetime.now().strftime("%d.%m.%Y-%H:%M:%S")
-writer = SummaryWriter(os.path.join(exp_path, "tb"))
-
+# paths
+exp_path = './logs/' + config.comment + "@" + datetime.now().strftime("%d.%m.%Y-%H:%M:%S")
+checkpoints_path = os.path.join(exp_path, 'checkpoints')
+images_path = os.path.join(exp_path, 'images')
+results_path = os.path.join(exp_path, 'results')
 if not os.path.isdir(exp_path):
     os.makedirs(exp_path)
+if not os.path.isdir(checkpoints_path):
+    os.makedirs(checkpoints_path)
+if not os.path.isdir(images_path):
+    os.makedirs(images_path)
+if not os.path.isdir(results_path):
+    os.makedirs(results_path)               
 
+writer = SummaryWriter(os.path.join(exp_path, "tb"))
+print ('Experiment directory created:', exp_path)
+
+start_epoch = 0
+continue_training = config.continue_training
 if continue_training:
-	checkpoints_path = os.path.join(exp_path, 'checkpoints')
-    last_exp = os.listdir(checkpoints_path)[-1]
+    last_exp = sorted(os.listdir(checkpoints_path))[-1]
     start_epoch = int(last_exp)
     print ("Loaded checkpoint from epoch", start_epoch)
     
     # load weights
     state_dict = torch.load(os.path.join(checkpoints_path, last_exp))
-    loss_d_history = state_dict['loss_d_history']
-    loss_g_history = state_dict['loss_g_history']
-    loss_g_l1_history  = state_dict['loss_g_l1_history']
-    loss_g_gan_history  = state_dict['loss_g_gan_history']
-    
     netG.load_state_dict(state_dict['Generator'])
     optimizerG.load_state_dict(state_dict['OptGenerator'])
     netD.load_state_dict(state_dict['Discriminator'])
     optimizerD.load_state_dict(state_dict['OptDiscriminator'])
-else:
-    start_epoch = 0
-    loss_d_history = []
-    loss_g_history = []
-    loss_g_l1_history  = []
-    loss_g_gan_history  = []
 
 
 for epoch in range(start_epoch, config.niter + config.niter_decay + 1):
+    print ('EPOCH', epoch)
     metric_dict = defaultdict(list)
-    for iteration, batch in enumerate(training_data_loader, 1):
-        
+    for iteration, batch in enumerate(training_data_loader):
+        n_iters_total = epoch * N + iteration
         if batch is None:
+            print ('NONE batch')
             continue
-        
+
         # forward
         real_a, real_b = batch[0].to(device), batch[1].to(device)
         fake_b = netG(real_a)
@@ -110,18 +106,18 @@ for epoch in range(start_epoch, config.niter + config.niter_decay + 1):
         ######################
         # (1) Update D network
         ######################
-        print ('Update D network, epoch {0}, iter: {1}'.format(epoch, iteration))
 
         optimizerD.zero_grad()
         
         # train with fake
         fake_ab = torch.cat((real_a, fake_b), 1)
-        pred_fake = netD.forward(fake_ab.detach())
+        pred_fake = netD.forward(fake_ab.detach()) # detach - don't penalize Generator
         loss_d_fake = criterionGAN(pred_fake, False)
 
         # train with real
         real_ab = torch.cat((real_a, real_b), 1)
         pred_real = netD.forward(real_ab)
+
         loss_d_real = criterionGAN(pred_real, True)
         
         # Combined D loss
@@ -134,7 +130,6 @@ for epoch in range(start_epoch, config.niter + config.niter_decay + 1):
         ######################
         # (2) Update G network
         ######################
-        print ('Update G network, epoch {0}, iter: {1}'.format(epoch, iteration))
 
         optimizerG.zero_grad()
 
@@ -144,7 +139,7 @@ for epoch in range(start_epoch, config.niter + config.niter_decay + 1):
         loss_g_gan = criterionGAN(pred_fake, True)
 
         # Second, G(A) = B
-        loss_g_l1 = criterionL1(fake_b, real_b) * lamb
+        loss_g_l1 = criterionL1(fake_b, real_b) * config.lamb
         loss_g = loss_g_gan + loss_g_l1
         loss_g.backward()
         
@@ -155,31 +150,52 @@ for epoch in range(start_epoch, config.niter + config.niter_decay + 1):
         optimizerG.step()
     	
         for title, value in metric_dict.items():
-	        writer.add_scalar(f"{name}/{title}", value[-1], n_iters_total)
+	        writer.add_scalar(f"train/{title}", value[-1], n_iters_total)
 
         if iteration%config.VIS_FREQ==0:
-                samples = vis_batch(fake_b.detach(), config.n_images_vis)
-                writer.add_image(f"keypoints_vis/{batch_i}", samples, global_step=n_iters_total)
+                generated_samples = vis_batch(fake_b.detach(), config.n_images_vis) 
+                edges_samples = vis_batch(real_a.detach(), config.n_images_vis) 
 
-        #checkpoint
-        if iteration%config.SAVE_FREQ==0:
-            save(exp_path, 
-            	N*epoch + iteration,
-            	netD,
-            	netG,
-            	optimizerD,
-            	optimizerG,
-            	loss_d_history,
-            	loss_g_history,
-            	loss_g_l1_history,
-            	loss_g_gan_history)
+                writer.add_image(f"{n_iters_total}/images",
+                                 generated_samples.transpose(2,0,1), # hcw -> chw
+                                  global_step=n_iters_total) 
+
+                writer.add_image(f"{n_iters_total}/edges",
+                                 edges_samples.transpose(2,0,1),
+                                 global_step=n_iters_total) 
+
+                # plt.imsave(os.path.join(images_path, '{}.jpg'.format(n_iters_total)), generated_samples)
+                save_batch(fake_b.detach(), folder=results_path)
+
+
+    #checkpoint
+    if epoch%config.SAVE_FREQ==0 and epoch > 0:
+        print ('Saving at epoch:', epoch)
+        dict_to_save = {"iteration":n_iters_total,
+                    	"netD":netD.state_dict(),
+                    	"netG":netG.state_dict(),
+                    	"optimizerD":optimizerD.state_dict(),
+                    	"optimizerG":optimizerG.state_dict()}
+
+        path = os.path.join(checkpoints_path, 'checkpoint_{:03}'.format(epoch))
+        torch.save(dict_to_save, path)
     
     # dump to tensorboard per-epoch stats
     for title, value in metric_dict.items():
-        writer.add_scalar(f"{title}_epoch", np.mean(value), epoch)
+        writer.add_scalar(f"epoch/{title}_epoch", np.mean(value), epoch)
+    
+    writer.add_scalar(f"epoch/lr_G",
+                      optimizerG.state_dict()['param_groups'][0]['lr'],
+                      epoch)
 
-    update_learning_rate(netG_scheduler, optimizerG)
-    update_learning_rate(netD_scheduler, optimizerD)
+    writer.add_scalar(f"epoch/lr_D", 
+                      optimizerD.state_dict()['param_groups'][0]['lr'], 
+                      epoch)    
+
+
+    if config.use_scheduler and epoch >= config.niter:    
+        update_learning_rate(netG_scheduler, optimizerG)
+        update_learning_rate(netD_scheduler, optimizerD)
 
         
 

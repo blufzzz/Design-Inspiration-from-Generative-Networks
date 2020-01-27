@@ -1,4 +1,4 @@
-# from https://github.com/mrzhu-cool/pix2pix-pytorch
+# Code below was taken from from https://github.com/mrzhu-cool/pix2pix-pytorch
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -26,7 +26,7 @@ def get_scheduler(optimizer, opt):
             return lr_l
         scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
     elif opt.lr_policy == 'step':
-        scheduler = lr_scheduler.StepLR(optimizer, step_size=opt.lr_decay_iters, gamma=0.1)
+        scheduler = lr_scheduler.StepLR(optimizer, step_size=opt.step_size, gamma=0.5)
     elif opt.lr_policy == 'plateau':
         scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, threshold=0.01, patience=5)
     elif opt.lr_policy == 'cosine':
@@ -110,17 +110,26 @@ class ResnetGenerator(nn.Module):
 
         self.outc = Outconv(ngf, output_nc)
 
-    def forward(self, input):
-        out = {}
-        out['in'] = self.inc(input)
-        out['d1'] = self.down1(out['in'])
-        out['d2'] = self.down2(out['d1'])
-        out['bottle'] = self.resblocks(out['d2'])
-        out['u1'] = self.up1(out['bottle'])
-        out['u2'] = self.up2(out['u1'])
+    # def forward(self, input):
+    #     out = {}
+    #     out['in'] = self.inc(input)
+    #     out['d1'] = self.down1(out['in'])
+    #     out['d2'] = self.down2(out['d1'])
+    #     out['bottle'] = self.resblocks(out['d2'])
+    #     out['u1'] = self.up1(out['bottle'])
+    #     out['u2'] = self.up2(out['u1'])
 
-        return self.outc(out['u2'])
+    #     return self.outc(out['u2'])
 
+    def forward(self, x):
+        x = self.inc(x)
+        x = self.down1(x)
+        x = self.down2(x)
+        x = self.resblocks(x)
+        x = self.up1(x)
+        x = self.up2(x)
+
+        return self.outc(x)
 
 class Inconv(nn.Module):
     def __init__(self, in_ch, out_ch, norm_layer, use_bias):
@@ -223,7 +232,7 @@ class Outconv(nn.Module):
         self.outconv = nn.Sequential(
             nn.ReflectionPad2d(3),
             nn.Conv2d(in_ch, out_ch, kernel_size=7, padding=0),
-            nn.Tanh()
+            nn.Sigmoid() # Tanh
         )
 
     def forward(self, x):
